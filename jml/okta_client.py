@@ -286,6 +286,12 @@ class OktaClient:
             self._handle_error(resp)
 
 
+    def update_user(self, user_id: str, profile: Dict[str, Any]) -> Dict[str, Any]:
+        resp = self._request("POST", f"/users/{user_id}", json={"profile": profile})
+        resp.raise_for_status()
+        return resp.json()
+
+
     # Helpers
 
     def _rate_limit_reset(self) -> Optional[int]:
