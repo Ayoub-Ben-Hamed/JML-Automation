@@ -223,3 +223,92 @@ def handle_move(event:HREvent,okta_client:OktaClient,group_manager:GroupManager,
         result.status = "success"
 
     return result
+
+def _get_user_groups(okta_client:OktaClient,user_id:str)->List[Dict[str,Any]]:
+    resp=okta_client._session.get(f"{okta_client.base_url}/users/{user_id}/groups")
+    if resp.status_code==200:
+        return resp.json()
+    return []
+
+def _get_direct_apps(okta_client:OktaClient,user_id:str)->List[dict[str,Any]]:
+    url=f"{okta_client.base_url}/apps"
+    resp=okta_client._session.get(url,params={"filter":f'user.id eq "{user_id}"'})
+    if resp.status_code==200:
+        return resp.json()
+    return []
+
+def handle_terminate(event:HREvent,okta_client:OktaClient,group_manager:GroupManager,app_manager:AppManager)->JMLResult:
+    result=JMLResult(
+        status="SUCCESS",
+        event_type=event.event_type.value,
+        employee_id=event.employee_id,
+        email=event.email
+    )
+    user_id:Optional[str]=None
+
+    # find user by login
+    try:
+        user=okta_client.find_user_by_login(event.email)
+        if not user:
+            result.status="failure"
+            result.errors.append(f"User {event.employee_id} not found")
+            return result
+        user_id=user["id"]
+        result.details["user_id"]=user_id
+        result.details["status_before"]=user.get("status","")
+    except Exception as exc:
+        result.status = "failure"
+        result.errors.append(f"Lookup failed: {exc}")
+        return result
+
+    # Desactivate user (should be before removing groups or revoking apps)
+    try:
+        desactivated=okta_client.deactivate_user(user_id)
+        result.details["status_after"]=desactivated.get("status")
+    except Exception as exc:
+        result.errors.append(f"Desactivation failed : {exc}")
+        result.status="partial"
+
+# Remove groups
+    groups_removed = []
+    try:
+        for group in _get_user_groups(okta_client, user_id):
+            if group.get("type") == "BUILT_IN":
+                continue
+            gid = group["id"]
+            gname = group.get("profile", {}).get("name", gid)
+            try:
+                group_manager.remove_user_from_group(user_id, gid)
+                groups_removed.append(gname)
+            except Exception as gexc:
+                result.warnings.append(f"Remove group {gname}: {gexc}")
+                result.status = "partial"
+        result.details["groups_removed"] = groups_removed
+    except Exception as exc:
+        result.warnings.append(f"Group cleanup: {exc}")
+        result.status = "partial"
+
+    # Revoke apps
+    apps_revoked = []
+    if app_manager:
+        try:
+            for app in _get_direct_apps(okta_client, user_id):
+                aid = app["id"]
+                aname = app.get("label", aid)
+                try:
+                    app_manager.remove_app_from_user(aid, user_id)
+                    apps_revoked.append(aname)
+                except Exception as aexc:
+                    result.warnings.append(f"Revoke app {aname}: {aexc}")
+                    result.status = "partial"
+            result.details["apps_revoked"] = apps_revoked
+        except Exception as exc:
+            result.warnings.append(f"App cleanup: {exc}")
+            result.status = "partial"
+
+    if result.errors:
+        result.status = "failure"
+    elif result.warnings:
+        result.status = "partial"
+
+    return result
