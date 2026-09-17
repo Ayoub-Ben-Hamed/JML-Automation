@@ -312,3 +312,37 @@ def handle_terminate(event:HREvent,okta_client:OktaClient,group_manager:GroupMan
         result.status = "partial"
 
     return result
+
+class JMLEngine:
+    def __init__(self,okta_client: OktaClient,group_manager: GroupManager,app_manager: Optional[AppManager] = None):
+        self.okta = okta_client
+        self.groups = group_manager
+        self.apps = app_manager
+
+    def process_event(self,event:HREvent)->JMLResult:
+        if event.event_type==EventType.HIRE:
+            return handle_hire(event,self.okta,self.groups,self.apps)
+        if event.event_type==EventType.MOVE:
+            return handle_move(event,self.okta,self.groups,self.apps)
+        if event.event_type==EventType.TERMINATE:
+            return handle_terminate(event,self.okta,self.groups,self.apps)
+        return JMLResult(
+            status="failure",
+            event_type=event.event_type.value,
+            employee_id=event.employee_id,
+            email=event.email,
+            errors=[f"Unsupported event type: {event.event_type.value}"]
+        )
+
+    def process_csv(self, events: List[HREvent]) -> Dict[str, Any]:
+        results: List[JMLResult] = []
+        for event in events:
+            results.append(self.process_event(event))
+
+        return {
+            "total": len(results),
+            "success": sum(1 for r in results if r.status == "success"),
+            "partial": sum(1 for r in results if r.status == "partial"),
+            "failure": sum(1 for r in results if r.status == "failure"),
+            "results": results,
+        }
