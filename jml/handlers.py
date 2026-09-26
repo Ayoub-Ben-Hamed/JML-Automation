@@ -14,6 +14,9 @@ from jml.group_diff import diff_groups
 from jml.app_manager import AppManager
 from jml.app_mappings import ROLE_TO_APPS
 
+import time
+from jml.audit_logger import AuditLogger
+
 @dataclass
 class JMLResult:
     status:str
@@ -32,7 +35,8 @@ class JMLResult:
     def is_failure(self)->bool:
         return self.status=="failure"
 
-def handle_hire(event:HREvent,okta_client:OktaClient,group_manager:GroupManager,app_manager:AppManager)-> JMLResult:
+def handle_hire(event:HREvent,okta_client:OktaClient,group_manager:GroupManager,app_manager:AppManager,audit:Optional[AuditLogger]=None)-> JMLResult:
+    t0=time.perf_counter()
     result=JMLResult(
         status="success",
         event_type=event.event_type.value,
@@ -120,9 +124,28 @@ def handle_hire(event:HREvent,okta_client:OktaClient,group_manager:GroupManager,
     else:
         result.status="success"
 
+    # Step 5: Log audit entry
+    if audit:
+        audit.log(
+            event_type="HIRE",
+            employee_id=event.employee_id,
+            user_email=event.email,
+            action="user_created,groups_assigned,apps_provisioned",
+            status=result.status,
+            new_role=event.role,
+            new_department=event.department,
+            groups_added=list(result.details.get("groups_added", [])),
+            apps_provisioned=list(result.details.get("apps_added", [])),
+            details=result.details,
+            errors=result.errors,
+            warnings=result.warnings,
+            duration_ms=int((time.perf_counter()-t0)*1000)
+        )
+
     return result
 
-def handle_move(event:HREvent,okta_client:OktaClient,group_manager:GroupManager,app_manager:AppManager)->JMLResult:
+def handle_move(event:HREvent,okta_client:OktaClient,group_manager:GroupManager,app_manager:AppManager,audit: Optional[AuditLogger] = None)->JMLResult:
+    t0=time.perf_counter()
     result = JMLResult(
         status="success",
         event_type=event.event_type.value,
@@ -222,6 +245,27 @@ def handle_move(event:HREvent,okta_client:OktaClient,group_manager:GroupManager,
     else:
         result.status = "success"
 
+    # Step 7: Log audit entry
+    if audit:
+        audit.log(
+            event_type="MOVE",
+            employee_id=event.employee_id,
+            user_email=event.email,
+            action="groups_diffed,profile_updated",
+            status=result.status,
+            old_role=event.old_role,
+            new_role=event.role,
+            old_department=event.old_department,
+            new_department=event.department,
+            groups_added=list(result.details.get("groups_added_ok", [])),
+            groups_removed=list(result.details.get("groups_removed_ok", [])),
+            apps_provisioned=list(result.details.get("apps_added", [])),
+            details=result.details,
+            errors=result.errors,
+            warnings=result.warnings,
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+        )
+
     return result
 
 def _get_user_groups(okta_client:OktaClient,user_id:str)->List[Dict[str,Any]]:
@@ -237,7 +281,8 @@ def _get_direct_apps(okta_client:OktaClient,user_id:str)->List[dict[str,Any]]:
         return resp.json()
     return []
 
-def handle_terminate(event:HREvent,okta_client:OktaClient,group_manager:GroupManager,app_manager:AppManager)->JMLResult:
+def handle_terminate(event:HREvent,okta_client:OktaClient,group_manager:GroupManager,app_manager:AppManager,audit: Optional[AuditLogger] = None)->JMLResult:
+    t0=time.perf_counter()
     result=JMLResult(
         status="SUCCESS",
         event_type=event.event_type.value,
@@ -311,27 +356,45 @@ def handle_terminate(event:HREvent,okta_client:OktaClient,group_manager:GroupMan
     elif result.warnings:
         result.status = "partial"
 
+    # Step 5: Log audit entry
+    if audit:
+        audit.log(
+            event_type="TERMINATE",
+            employee_id=event.employee_id,
+            user_email=event.email,
+            action="user_deactivated,groups_removed,apps_revoked",
+            status=result.status,
+            old_role=event.role,
+            old_department=event.department,
+            groups_removed=list(result.details.get("groups_removed", [])),
+            apps_provisioned=list(result.details.get("apps_revoked", [])),
+            errors=result.errors,
+            warnings=result.warnings,
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+        )
+
     return result
 
 class JMLEngine:
-    def __init__(self,okta_client: OktaClient,group_manager: GroupManager,app_manager: Optional[AppManager] = None):
+    def __init__(self,okta_client:OktaClient,group_manager:GroupManager,app_manager:Optional[AppManager]=None,audit_logger:Optional[AuditLogger]=None):
         self.okta = okta_client
         self.groups = group_manager
         self.apps = app_manager
+        self.audit = audit_logger
 
-    def process_event(self,event:HREvent)->JMLResult:
-        if event.event_type==EventType.HIRE:
-            return handle_hire(event,self.okta,self.groups,self.apps)
-        if event.event_type==EventType.MOVE:
-            return handle_move(event,self.okta,self.groups,self.apps)
-        if event.event_type==EventType.TERMINATE:
-            return handle_terminate(event,self.okta,self.groups,self.apps)
+    def process_event(self, event: HREvent) -> JMLResult:
+        if event.event_type == EventType.HIRE:
+            return handle_hire(event, self.okta, self.groups, self.apps, self.audit)
+        if event.event_type == EventType.MOVE:
+            return handle_move(event, self.okta, self.groups, self.apps, self.audit)
+        if event.event_type == EventType.TERMINATE:
+            return handle_terminate(event, self.okta, self.groups, self.apps, self.audit)
         return JMLResult(
             status="failure",
             event_type=event.event_type.value,
             employee_id=event.employee_id,
             email=event.email,
-            errors=[f"Unsupported event type: {event.event_type.value}"]
+            errors=[f"Unsupported event type: {event.event_type.value}"],
         )
 
     def process_csv(self, events: List[HREvent]) -> Dict[str, Any]:
@@ -339,10 +402,22 @@ class JMLEngine:
         for event in events:
             results.append(self.process_event(event))
 
-        return {
+        summary = {
             "total": len(results),
             "success": sum(1 for r in results if r.status == "success"),
             "partial": sum(1 for r in results if r.status == "partial"),
             "failure": sum(1 for r in results if r.status == "failure"),
             "results": results,
         }
+
+        if self.audit:
+            self.audit.log(
+                event_type="BATCH",
+                employee_id="BATCH",
+                user_email="batch@internal",
+                action="batch_completed",
+                status="success" if summary["failure"] == 0 else "partial",
+                triggered_by="jml_engine",
+            )
+
+        return summary

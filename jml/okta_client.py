@@ -287,9 +287,13 @@ class OktaClient:
 
 
     def update_user(self, user_id: str, profile: Dict[str, Any]) -> Dict[str, Any]:
-        resp = self._request("POST", f"/users/{user_id}", json={"profile": profile})
-        resp.raise_for_status()
-        return resp.json()
+        """Partially update a user's profile using standard REST semantics."""
+        resp=self._request("PATCH",f"{self.base_url}/users/{user_id}",json={"profile":profile})
+
+        if resp.status_code==200:
+            return resp.json()
+        self._handle_error(resp)
+        return {}
 
 
     # Helpers

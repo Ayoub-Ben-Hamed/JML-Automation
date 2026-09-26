@@ -30,10 +30,7 @@ class HireProcessor:
         if existing:
             status = existing.get("status")
             if status == "DEPROVISIONED":
-                logger.warning(
-                    "HIRE for deprovisioned user %s. Consider REHIRE instead.",
-                    event.email,
-                )
+                logger.warning("HIRE for deprovisioned user %s. Consider REHIRE instead.",event.email)
                 raise UserAlreadyExistsError(
                     f"User {event.email} exists but is DEPROVISIONED. "
                     "Convert event to REHIRE.",
@@ -41,10 +38,7 @@ class HireProcessor:
                     "JML_DUPLICATE_DEPROVISIONED",
                 )
             if status in ("ACTIVE", "PROVISIONED", "STAGED"):
-                logger.warning(
-                    "HIRE skipped: user %s already exists with status %s",
-                    event.email, status,
-                )
+                logger.warning("HIRE skipped: user %s already exists with status %s",event.email, status)
                 raise UserAlreadyExistsError(
                     f"User {event.email} already exists with status {status}.",
                     409,

@@ -46,7 +46,7 @@ class JMLProcessor:
             self.groups.add_user_to_group(user["id"],g["id"])
 
         # Update profile attributes
-        self.okta.update_user(user["id"], event.to_okta_profile()) #idk if i have this method inside okta_client
+        self.okta.update_user(user["id"], event.to_okta_profile())
 
         return user
     def process_terminate(self, event: HREvent):

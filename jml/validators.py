@@ -52,12 +52,12 @@ class HRValidator:
             issues.append(RowIssue(line_number,emp_id or "UNKNOWN","event_type",f"Invalid {raw_evt} . Events allowed : {[e.value for e in EventType]}",ValidationSeverity.ERROR,raw_evt))
             return None,issues
 
-        # 2. Required fields
+        # 2.Required fields
         for field in self._REQUIRED.get(event_type, set()):
             val = row.get(field, "").strip()
             if not val or val.lower() in ("null", "none", "n/a", ""):
                 issues.append(RowIssue(line_number, emp_id or "UNKNOWN", field,f"Required for {event_type.value}", ValidationSeverity.ERROR, val))
-        # 3. Employee ID format
+        # 3.Employee ID format
         if emp_id and not self._EMP_ID_RE.match(emp_id):
             issues.append(RowIssue(line_number, emp_id, "employee_id",f"'{emp_id}' must match EMP-XXXXX",ValidationSeverity.ERROR, emp_id))
         # 4. Email format

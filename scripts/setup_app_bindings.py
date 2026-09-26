@@ -37,4 +37,4 @@ def setup_app_group_bindings(app_manager:AppManager,group_manager:GroupManager):
             logging.warning("Group ' %s ' not fount !", group_name)
             continue
         app_manager.assign_app_to_group(app["id"],group["id"])
-        logger.info("Bound %s -> %s", app_label, group_name)
+        logging.info("Bound %s -> %s", app_label, group_name)
